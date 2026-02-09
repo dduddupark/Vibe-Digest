@@ -37,20 +37,13 @@ async def summarize(request: SummarizeRequest):
         headers = {
             "X-With-Generated-Alt": "true"
         }
-        jina_key = os.getenv("JINA_API_KEY")
-        # Strict check: ignore placeholders or empty strings
-        if jina_key and len(jina_key) > 10 and not jina_key.startswith("...") and "선택사항" not in jina_key:
-            headers["Authorization"] = f"Bearer {jina_key}"
-        else:
-            print("Jina AI Key is invalid or missing. Using free tier.")
-            
-        response = requests.get(jina_url, headers=headers)
+        # FORCE FREE TIER: Do not use any API Key for Jina AI
+        # This prevents 401 Unauthorized errors caused by invalid/revoked keys
+        # jina_key = os.getenv("JINA_API_KEY") ... (Ignored)
         
-        # Retry logic: If 401 Unauthorized, try again without the key (free tier)
-        if response.status_code == 401 and "Authorization" in headers:
-            print("Jina AI 401 Unauthorized with key. Retrying without key...")
-            del headers["Authorization"]
-            response = requests.get(jina_url, headers=headers)
+        # headers["Authorization"] = ... (Removed)
+        
+        response = requests.get(jina_url, headers=headers)
 
         response.raise_for_status()
         content = response.text
