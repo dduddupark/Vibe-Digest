@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import requests
 import os
+import cloudscraper
 from bs4 import BeautifulSoup
 from google import genai
 from dotenv import load_dotenv
@@ -31,35 +32,31 @@ class SummarizeRequest(BaseModel):
 
 @app.post("/api/summarize")
 async def summarize(request: SummarizeRequest):
-    # 1. Extract content with Jina AI Reader (Reverted due to 403 blocks)
-    jina_url = f"https://r.jina.ai/{request.url}"
+    # 1. Extract content using cloudscraper (Bypasses Cloudflare & 403 Forbidden)
     try:
-        headers = {
-            "X-With-Generated-Alt": "true",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        }
-        # FORCE FREE TIER: Do not use any API Key for Jina AI
-        # This prevents 401 Unauthorized errors caused by invalid/revoked keys
-        
-        response = requests.get(jina_url, headers=headers)
-
-        response.raise_for_status()
-        content = response.text
-    except Exception as e:
-        # Fallback to direct requests if Jina AI fails completely
-        try:
-            print(f"Jina AI failed ({str(e)}). Trying direct scraping...")
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        scraper = cloudscraper.create_scraper(
+            browser={
+                'browser': 'chrome',
+                'platform': 'windows',
+                'desktop': True
             }
-            response = requests.get(request.url, headers=headers, timeout=10)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.text, 'html.parser')
-            for script in soup(["script", "style", "nav", "footer", "header"]):
-                script.decompose()
-            content = soup.get_text(separator=' ', strip=True)
-        except Exception as e2:
-            raise HTTPException(status_code=500, detail=f"Failed to fetch content (Jina: {str(e)}, Direct: {str(e2)})")
+        )
+        response = scraper.get(request.url)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Remove script and style elements
+        for script in soup(["script", "style", "nav", "footer", "header", "iframe", "noscript"]):
+            script.decompose()
+            
+        content = soup.get_text(separator=' ', strip=True)
+        
+        if not content:
+            raise HTTPException(status_code=400, detail="Could not extract text content from the URL.")
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch content with cloudscraper: {str(e)}")
 
     # 2. Summarize with Google Gemini
     gemini_key = os.getenv("GEMINI_API_KEY")
