@@ -150,7 +150,17 @@ async def summarize(request: SummarizeRequest):
             try:
                 print(f"Summarizing with {model_name}...")
                 model = genai.GenerativeModel(model_name)
-                prompt = f"Please provide a concise summary of this article in its original language:\n\n{safe_content}"
+                prompt = f"""
+                Please provide a highly structured summary of the following article in its original language.
+                
+                Strictly follow this format:
+                1. One sentence headline starting with **[Headline]**
+                2. 3 Key Points as a bulleted list
+                3. One Insight Comment starting with *[Insight]* and in italics
+                
+                Article content:
+                {safe_content}
+                """
                 response = model.generate_content(prompt)
                 if response and response.text:
                     return {"summary": response.text}
