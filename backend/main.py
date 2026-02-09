@@ -109,47 +109,58 @@ async def summarize(request: SummarizeRequest):
     try:
         genai.configure(api_key=gemini_key)
         
-        # Priority models for free tier
-        models_to_try = [
-            "gemini-1.5-flash",
-            "gemini-1.5-flash-latest",
-            "gemini-1.5-pro",
-            "gemini-1.0-pro",
-            "gemini-pro"
+        # Priority models: 1.5-flash is MUCH better for free tier quota (TPM/RPM)
+        # Avoid Pro models if possible as they often have 0 quota on new accounts
+        models_priority = [
+            "models/gemini-1.5-flash",
+            "models/gemini-1.5-flash-latest",
+            "models/gemini-pro",
+            "models/gemini-1.5-pro"
         ]
         
-        # Dynamic discovery
-        available_models = []
+        # Discover actual available models to be sure
+        actual_available = []
         try:
             for m in genai.list_models():
                 if 'generateContent' in m.supported_generation_methods:
-                    available_models.append(m.name)
+                    actual_available.append(m.name)
         except:
-            pass
+            actual_available = models_priority # Fallback to priority list
 
+        # Build final queue: prioritize flash above all
         final_queue = []
-        for p in models_to_try:
-            for m in available_models:
-                if p in m and m not in final_queue:
-                    final_queue.append(m)
+        for target in models_priority:
+            if target in actual_available:
+                final_queue.append(target)
+        
+        # Add any other available models just in case
+        for m in actual_available:
+            if m not in final_queue:
+                final_queue.append(m)
+
         if not final_queue:
-            final_queue = ["models/gemini-1.5-flash", "models/gemini-pro"]
+            final_queue = ["models/gemini-1.5-flash"]
 
         last_error = ""
+        # Truncate content more aggressively to avoid Token-Per-Minute (TPM) limits
+        # 10,000 chars is roughly 2.5k-3k tokens, safe for free tier.
+        safe_content = content[:10000] 
+
         for model_name in final_queue:
             try:
-                print(f"Summarizing with {model_name}")
+                print(f"Summarizing with {model_name}...")
                 model = genai.GenerativeModel(model_name)
-                prompt = f"Summarize the following content in the same language as the content:\n\n{content[:30000]}"
+                prompt = f"Please provide a concise summary of this article in its original language:\n\n{safe_content}"
                 response = model.generate_content(prompt)
                 if response and response.text:
                     return {"summary": response.text}
             except Exception as e:
                 last_error = str(e)
                 print(f"Model {model_name} failed: {last_error}")
+                # If we get a 429, we skip to the next model (Flash -> Pro etc)
                 continue
 
-        raise HTTPException(status_code=500, detail=f"All models failed. Last error: {last_error}")
+        raise HTTPException(status_code=500, detail=f"All models reached quota or failed. Last error: {last_error}")
 
     except HTTPException as he:
         raise he
