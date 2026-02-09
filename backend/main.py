@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import requests
 import os
+from bs4 import BeautifulSoup
 from google import genai
 from dotenv import load_dotenv
 
@@ -30,28 +31,27 @@ class SummarizeRequest(BaseModel):
 
 @app.post("/api/summarize")
 async def summarize(request: SummarizeRequest):
-    # 1. Extract content with Jina AI Reader
-    jina_url = f"https://r.jina.ai/{request.url}"
+    # 1. Extract content directly (No Jina AI)
     try:
         headers = {
-            "X-With-Generated-Alt": "true"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
-        jina_key = os.getenv("JINA_API_KEY")
-        if jina_key and jina_key.strip() and not jina_key.startswith("...") and "선택사항" not in jina_key:
-            headers["Authorization"] = f"Bearer {jina_key}"
-            
-        response = requests.get(jina_url, headers=headers)
-        
-        # Retry logic: If 401 Unauthorized, try again without the key (free tier)
-        if response.status_code == 401 and "Authorization" in headers:
-            print("Jina AI 401 Unauthorized with key. Retrying without key...")
-            del headers["Authorization"]
-            response = requests.get(jina_url, headers=headers)
-
+        response = requests.get(request.url, headers=headers, timeout=10)
         response.raise_for_status()
-        content = response.text
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Remove script and style elements
+        for script in soup(["script", "style", "nav", "footer", "header"]):
+            script.decompose()
+            
+        content = soup.get_text(separator=' ', strip=True)
+        
+        if not content:
+            raise HTTPException(status_code=400, detail="Could not extract text content from the URL.")
+            
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch content from Jina AI ({response.status_code if 'response' in locals() else 'Unknown'}): {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch URL content: {str(e)}")
 
     # 2. Summarize with Google Gemini
     gemini_key = os.getenv("GEMINI_API_KEY")
