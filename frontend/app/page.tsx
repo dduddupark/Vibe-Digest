@@ -79,10 +79,11 @@ export default function Home() {
             >
               {loading ? (
                 <div className="flex flex-col items-center gap-2">
-                  <div className="cat-run-container">
-                    <span className="cat-emoji">🐈‍⬛</span>
+                  <div className="thinking-eyes">
+                    <div className="eye"></div>
+                    <div className="eye"></div>
                   </div>
-                  <span className="text-sm font-medium animate-pulse">기사를 읽고 있어요...</span>
+                  <span className="text-sm font-medium animate-pulse">핵심 내용을 생각하고 있어요...</span>
                 </div>
               ) : (
                 '요약하기'
@@ -126,25 +127,40 @@ export default function Home() {
           font-family: 'Inter', 'Noto Sans KR', sans-serif;
         }
 
-        .cat-run-container {
+        .thinking-eyes {
+          display: flex;
+          gap: 6px;
+          justify-content: center;
+          align-items: center;
+          height: 24px;
+        }
+
+        .eye {
+          width: 14px;
+          height: 14px;
+          background: white;
+          border-radius: 50%;
           position: relative;
-          width: 60px;
-          height: 30px;
-          overflow: hidden;
         }
 
-        .cat-emoji {
+        .eye::after {
+          content: '';
           position: absolute;
-          font-size: 24px;
-          animation: catRun 1.5s infinite linear;
+          width: 6px;
+          height: 6px;
+          background: black;
+          border-radius: 50%;
+          left: 4px;
+          top: 4px;
+          animation: eyeRoll 1.2s infinite linear;
         }
 
-        @keyframes catRun {
-          0% { left: -30px; transform: scaleX(1); }
-          45% { transform: scaleX(1); }
-          50% { left: 60px; transform: scaleX(-1); }
-          95% { transform: scaleX(-1); }
-          100% { left: -30px; transform: scaleX(1); }
+        @keyframes eyeRoll {
+          0% { transform: translate(-2px, -2px); }
+          25% { transform: translate(2px, -2px); }
+          50% { transform: translate(2px, 2px); }
+          75% { transform: translate(-2px, 2px); }
+          100% { transform: translate(-2px, -2px); }
         }
 
         .markdown-content strong {
