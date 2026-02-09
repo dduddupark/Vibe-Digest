@@ -1,6 +1,7 @@
 # Vibe Digest
 
 Jina AI와 GPT-4o-mini를 기반으로 한 미니멀한 뉴스레터/블로그 요약 서비스입니다.
+
 https://vibe-digest-pi.vercel.app/
 
 ## 프로젝트 구조 (Project Structure)
