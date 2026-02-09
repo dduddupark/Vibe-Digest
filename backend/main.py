@@ -91,8 +91,40 @@ async def summarize(request: SummarizeRequest):
     
     try:
         genai.configure(api_key=gemini_key)
-        # Using gemini-pro which is widely supported and stable in this SDK version
-        model = genai.GenerativeModel('gemini-pro')
+        
+        # Dynamic Model Selection: Find a model that supports generateContent
+        # This fixes persistent 404 errors by asking the API "what can I use?"
+        available_models = []
+        try:
+            for m in genai.list_models():
+                if 'generateContent' in m.supported_generation_methods:
+                    available_models.append(m.name)
+        except Exception as e:
+            print(f"Error listing models: {e}")
+
+        # Priority list
+        target_model = 'models/gemini-1.5-flash' # Default
+        
+        # Try to match the best available model
+        priorities = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-1.0-pro', 'gemini-pro']
+        
+        found_model = None
+        for p in priorities:
+            for m in available_models:
+                if p in m:
+                    found_model = m
+                    break
+            if found_model:
+                break
+        
+        if found_model:
+            target_model = found_model
+            print(f"Selected Gemini Model: {target_model}")
+        elif available_models:
+            target_model = available_models[0] # Fallback to first available
+            print(f"Fallback Gemini Model: {target_model}")
+            
+        model = genai.GenerativeModel(target_model)
         
         prompt = f"""
         Please summarize the following content. The summary must be in the language of the content.
