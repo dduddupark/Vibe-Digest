@@ -3,4 +3,4 @@ uvicorn
 python-dotenv
 requests
 beautifulsoup4
-openai
+google-generativeai

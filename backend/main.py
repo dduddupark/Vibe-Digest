@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import requests
 import os
-from openai import OpenAI
+import google.generativeai as genai
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -47,12 +47,13 @@ async def summarize(request: SummarizeRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch content from Jina AI: {str(e)}")
 
-    # 2. Summarize with OpenAI GPT-4o-mini
-    openai_key = os.getenv("OPENAI_API_KEY")
-    if not openai_key:
-         raise HTTPException(status_code=500, detail="OpenAI API Key not configured")
+    # 2. Summarize with Google Gemini
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    if not gemini_key:
+         raise HTTPException(status_code=500, detail="Gemini API Key not configured")
     
-    client = OpenAI(api_key=openai_key)
+    genai.configure(api_key=gemini_key)
+    model = genai.GenerativeModel('gemini-1.5-flash')
     
     prompt = f"""
     Please summarize the following content. The summary must be in the language of the content.
@@ -63,19 +64,13 @@ async def summarize(request: SummarizeRequest):
     3. Insight Comment (italic)
     
     Content:
-    {content[:15000]} 
+    {content[:30000]} 
     """
-    # Truncate to avoid token limits, though 128k context is large, it saves cost/time.
+    # Truncate content to fit context window (Gemini has large window but good to be safe)
 
     try:
-        completion = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are a professional content summarizer. Provide concise and actionable summaries."},
-                {"role": "user", "content": prompt}
-            ]
-        )
-        summary = completion.choices[0].message.content
+        response = model.generate_content(prompt)
+        summary = response.text
         return {"summary": summary}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"OpenAI summarization failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Google Gemini summarization failed: {str(e)}")
