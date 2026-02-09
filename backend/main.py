@@ -41,10 +41,17 @@ async def summarize(request: SummarizeRequest):
             headers["Authorization"] = f"Bearer {jina_key}"
             
         response = requests.get(jina_url, headers=headers)
+        
+        # Retry logic: If 401 Unauthorized, try again without the key (free tier)
+        if response.status_code == 401 and "Authorization" in headers:
+            print("Jina AI 401 Unauthorized with key. Retrying without key...")
+            del headers["Authorization"]
+            response = requests.get(jina_url, headers=headers)
+
         response.raise_for_status()
         content = response.text
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch content from Jina AI: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch content from Jina AI ({response.status_code if 'response' in locals() else 'Unknown'}): {str(e)}")
 
     # 2. Summarize with Google Gemini
     gemini_key = os.getenv("GEMINI_API_KEY")
