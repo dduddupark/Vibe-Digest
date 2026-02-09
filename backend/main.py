@@ -32,59 +32,76 @@ class SummarizeRequest(BaseModel):
 
 @app.post("/api/summarize")
 async def summarize(request: SummarizeRequest):
-    # 1. Extract content using cloudscraper (Primary)
+    # 1. Extract content with multiple fallbacks
+    url = request.url.strip()
     content = ""
     error_details = []
-    
+
+    # Source 1: Jina AI with URL Encoding
     try:
-        scraper = cloudscraper.create_scraper(
-            browser={
-                'browser': 'chrome',
-                'platform': 'windows',
-                'desktop': True
-            }
-        )
-        response = scraper.get(request.url)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, 'html.parser')
-        for script in soup(["script", "style", "nav", "footer", "header", "iframe", "noscript"]):
-            script.decompose()
-        content = soup.get_text(separator=' ', strip=True)
+        from urllib.parse import quote
+        encoded_url = quote(url, safe="")
+        jina_url = f"https://r.jina.ai/{url}" # Jina usually handles raw URL well but let's try
         
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        response = requests.get(jina_url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            potential_content = response.text
+            # Basic validation: check if it's not a generic error/help page
+            if len(potential_content) > 200 and "Google Search" not in potential_content[:500]:
+                content = potential_content
+                print("Extracted content via Jina AI")
+            else:
+                error_details.append("Jina AI returned invalid/help content")
+        else:
+            error_details.append(f"Jina AI returned status {response.status_code}")
     except Exception as e:
-        error_details.append(f"Cloudscraper failed: {str(e)}")
-        
-        # 2. Fallback: Google Web Cache (Bypass IP blocking)
+        error_details.append(f"Jina AI failed: {str(e)}")
+
+    # Source 2: Microlink (Powerful backup)
+    if not content:
         try:
-            print(f"Primary scraping failed. Trying Google Web Cache for {request.url}")
-            # Use specific headers to mimic a user coming from Google Search
-            cache_url = f"http://webcache.googleusercontent.com/search?q=cache:{request.url}&strip=1&vwsrc=0"
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-                "Referer": "https://www.google.com/"
-            }
-            response = requests.get(cache_url, headers=headers, timeout=10)
-            
-            # Google Cache returns 404 if not found, or 200 if found
+            print(f"Trying Microlink for {url}")
+            microlink_url = f"https://api.microlink.io/?url={quote(url)}&embed=content.text"
+            response = requests.get(microlink_url, timeout=15)
+            if response.status_code == 200:
+                data = response.json()
+                content = data.get('data', {}).get('content', {}).get('text', '')
+                if content and len(content) > 100:
+                    print("Extracted content via Microlink")
+                else:
+                    content = ""
+                    error_details.append("Microlink returned empty content")
+            else:
+                error_details.append(f"Microlink returned status {response.status_code}")
+        except Exception as e:
+            error_details.append(f"Microlink failed: {str(e)}")
+
+    # Source 3: Cloudscraper (Last resort direct)
+    if not content:
+        try:
+            print(f"Trying Cloudscraper for {url}")
+            scraper = cloudscraper.create_scraper()
+            response = scraper.get(url, timeout=15)
             if response.status_code == 200:
                 soup = BeautifulSoup(response.text, 'html.parser')
-                # Google Cache adds a header/banner, remove it
-                auth_header = soup.find(id="google-cache-hdr")
-                if auth_header:
-                    auth_header.decompose()
-                    
+                for s in soup(["script", "style", "nav", "footer", "header"]):
+                    s.decompose()
                 content = soup.get_text(separator=' ', strip=True)
+                if "Access Denied" in content or "Robot Check" in content:
+                    content = ""
+                    error_details.append("Cloudscraper hit a block/captcha")
             else:
-                error_details.append(f"Google Cache returned {response.status_code}")
-                
-        except Exception as e2:
-            error_details.append(f"Google Cache failed: {str(e2)}")
+                error_details.append(f"Cloudscraper returned status {response.status_code}")
+        except Exception as e:
+            error_details.append(f"Cloudscraper failed: {str(e)}")
 
     if not content:
-        # If all methods fail, raise the accumulated errors
         raise HTTPException(status_code=500, detail=f"Failed to fetch content. Errors: {'; '.join(error_details)}")
 
-    # 2. Summarize with Google Gemini
+    # 2. Summarize with Google Gemini (Robust Retry)
     gemini_key = os.getenv("GEMINI_API_KEY")
     if not gemini_key:
          raise HTTPException(status_code=500, detail="Gemini API Key not configured")
@@ -92,58 +109,49 @@ async def summarize(request: SummarizeRequest):
     try:
         genai.configure(api_key=gemini_key)
         
-        # 1. Discover models dynamically
+        # Priority models for free tier
+        models_to_try = [
+            "gemini-1.5-flash",
+            "gemini-1.5-flash-latest",
+            "gemini-1.5-pro",
+            "gemini-1.0-pro",
+            "gemini-pro"
+        ]
+        
+        # Dynamic discovery
         available_models = []
         try:
             for m in genai.list_models():
                 if 'generateContent' in m.supported_generation_methods:
                     available_models.append(m.name)
-        except Exception as e:
-            print(f"Error listing models: {e}")
-            # Fallback to hardcoded list if listing fails
-            available_models = ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro']
+        except:
+            pass
 
-        # 2. Prioritize models: 1.5-flash is best for free tier quota
-        priorities = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-1.0-pro', 'gemini-pro']
-        sorted_models = []
-        for p in priorities:
+        final_queue = []
+        for p in models_to_try:
             for m in available_models:
-                if p in m and m not in sorted_models:
-                    sorted_models.append(m)
-        for m in available_models:
-            if m not in sorted_models:
-                sorted_models.append(m)
+                if p in m and m not in final_queue:
+                    final_queue.append(m)
+        if not final_queue:
+            final_queue = ["models/gemini-1.5-flash", "models/gemini-pro"]
 
-        # 3. Try each model until one succeeds (Handle 429/404/etc)
-        last_error = "No models available to try"
-        for model_name in sorted_models:
+        last_error = ""
+        for model_name in final_queue:
             try:
-                print(f"Attempting summary with {model_name}...")
+                print(f"Summarizing with {model_name}")
                 model = genai.GenerativeModel(model_name)
-                
-                prompt = f"""
-                Please summarize the following content. The summary must be in the language of the content.
-                
-                Format:
-                1. One sentence headline (bold)
-                2. 3 Key Points (bullet list)
-                3. Insight Comment (italic)
-                
-                Content:
-                {content[:30000]} 
-                """
-                
+                prompt = f"Summarize the following content in the same language as the content:\n\n{content[:30000]}"
                 response = model.generate_content(prompt)
                 if response and response.text:
                     return {"summary": response.text}
             except Exception as e:
-                print(f"Model {model_name} failed: {str(e)}")
                 last_error = str(e)
-                continue # Try the next model
-        
-        raise HTTPException(status_code=500, detail=f"All Gemini models failed (including quota limits). Last error: {last_error}")
+                print(f"Model {model_name} failed: {last_error}")
+                continue
+
+        raise HTTPException(status_code=500, detail=f"All models failed. Last error: {last_error}")
 
     except HTTPException as he:
         raise he
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Google Gemini summarization failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Summarization process failed: {str(e)}")
