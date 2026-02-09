@@ -92,8 +92,7 @@ async def summarize(request: SummarizeRequest):
     try:
         genai.configure(api_key=gemini_key)
         
-        # Dynamic Model Selection: Find a model that supports generateContent
-        # This fixes persistent 404 errors by asking the API "what can I use?"
+        # 1. Discover models dynamically
         available_models = []
         try:
             for m in genai.list_models():
@@ -101,46 +100,50 @@ async def summarize(request: SummarizeRequest):
                     available_models.append(m.name)
         except Exception as e:
             print(f"Error listing models: {e}")
+            # Fallback to hardcoded list if listing fails
+            available_models = ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro']
 
-        # Priority list
-        target_model = 'models/gemini-1.5-flash' # Default
-        
-        # Try to match the best available model
+        # 2. Prioritize models: 1.5-flash is best for free tier quota
         priorities = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-1.0-pro', 'gemini-pro']
-        
-        found_model = None
+        sorted_models = []
         for p in priorities:
             for m in available_models:
-                if p in m:
-                    found_model = m
-                    break
-            if found_model:
-                break
-        
-        if found_model:
-            target_model = found_model
-            print(f"Selected Gemini Model: {target_model}")
-        elif available_models:
-            target_model = available_models[0] # Fallback to first available
-            print(f"Fallback Gemini Model: {target_model}")
-            
-        model = genai.GenerativeModel(target_model)
-        
-        prompt = f"""
-        Please summarize the following content. The summary must be in the language of the content.
-        
-        Format:
-        1. One sentence headline (bold)
-        2. 3 Key Points (bullet list)
-        3. Insight Comment (italic)
-        
-        Content:
-        {content[:30000]} 
-        """
-        
-        response = model.generate_content(prompt)
-        summary = response.text
-        return {"summary": summary}
+                if p in m and m not in sorted_models:
+                    sorted_models.append(m)
+        for m in available_models:
+            if m not in sorted_models:
+                sorted_models.append(m)
 
+        # 3. Try each model until one succeeds (Handle 429/404/etc)
+        last_error = "No models available to try"
+        for model_name in sorted_models:
+            try:
+                print(f"Attempting summary with {model_name}...")
+                model = genai.GenerativeModel(model_name)
+                
+                prompt = f"""
+                Please summarize the following content. The summary must be in the language of the content.
+                
+                Format:
+                1. One sentence headline (bold)
+                2. 3 Key Points (bullet list)
+                3. Insight Comment (italic)
+                
+                Content:
+                {content[:30000]} 
+                """
+                
+                response = model.generate_content(prompt)
+                if response and response.text:
+                    return {"summary": response.text}
+            except Exception as e:
+                print(f"Model {model_name} failed: {str(e)}")
+                last_error = str(e)
+                continue # Try the next model
+        
+        raise HTTPException(status_code=500, detail=f"All Gemini models failed (including quota limits). Last error: {last_error}")
+
+    except HTTPException as he:
+        raise he
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Google Gemini summarization failed: {str(e)}")
