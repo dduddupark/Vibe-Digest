@@ -22,13 +22,14 @@ export default function Home() {
       });
 
       if (!res.ok) {
-        throw new Error('Failed to fetch summary');
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Failed to fetch summary');
       }
 
       const data = await res.json();
       setSummary(data.summary);
-    } catch (err) {
-      setError('An error occurred. Please try again.');
+    } catch (err: any) {
+      setError(err.message || 'An error occurred. Please try again.');
     } finally {
       setLoading(false);
     }
