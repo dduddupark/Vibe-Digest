@@ -104,11 +104,23 @@ async def summarize(request: SummarizeRequest):
         {content[:30000]} 
         """
         
-        response = client.models.generate_content(
-            model="gemini-1.5-flash-001",
-            contents=prompt
-        )
-        summary = response.text
-        return {"summary": summary}
+        models_to_try = ["gemini-1.5-flash", "gemini-1.5-flash-001", "gemini-1.5-pro", "gemini-2.0-flash-exp"]
+        last_exception = None
+        
+        for model_name in models_to_try:
+            try:
+                print(f"Trying Gemini model: {model_name}")
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt
+                )
+                summary = response.text
+                return {"summary": summary}
+            except Exception as e:
+                print(f"Model {model_name} failed: {str(e)}")
+                last_exception = e
+                
+        if last_exception:
+             raise last_exception
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Google Gemini summarization failed: {str(e)}")
