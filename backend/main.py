@@ -5,7 +5,7 @@ import requests
 import os
 import cloudscraper
 from bs4 import BeautifulSoup
-from google import genai
+import google.generativeai as genai
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -85,12 +85,18 @@ async def summarize(request: SummarizeRequest):
         raise HTTPException(status_code=500, detail=f"Failed to fetch content. Errors: {'; '.join(error_details)}")
 
     # 2. Summarize with Google Gemini
+        {content[:30000]} 
+        """
+        
+    # 2. Summarize with Google Gemini
     gemini_key = os.getenv("GEMINI_API_KEY")
     if not gemini_key:
          raise HTTPException(status_code=500, detail="Gemini API Key not configured")
     
     try:
-        client = genai.Client(api_key=gemini_key)
+        genai.configure(api_key=gemini_key)
+        # Using gemini-pro which is widely supported and stable in this SDK version
+        model = genai.GenerativeModel('gemini-pro')
         
         prompt = f"""
         Please summarize the following content. The summary must be in the language of the content.
@@ -104,23 +110,9 @@ async def summarize(request: SummarizeRequest):
         {content[:30000]} 
         """
         
-        models_to_try = ["gemini-1.5-flash", "gemini-1.5-flash-001", "gemini-1.5-pro", "gemini-2.0-flash-exp"]
-        last_exception = None
-        
-        for model_name in models_to_try:
-            try:
-                print(f"Trying Gemini model: {model_name}")
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=prompt
-                )
-                summary = response.text
-                return {"summary": summary}
-            except Exception as e:
-                print(f"Model {model_name} failed: {str(e)}")
-                last_exception = e
-                
-        if last_exception:
-             raise last_exception
+        response = model.generate_content(prompt)
+        summary = response.text
+        return {"summary": summary}
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Google Gemini summarization failed: {str(e)}")
