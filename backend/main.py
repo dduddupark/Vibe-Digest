@@ -85,10 +85,6 @@ async def summarize(request: SummarizeRequest):
         raise HTTPException(status_code=500, detail=f"Failed to fetch content. Errors: {'; '.join(error_details)}")
 
     # 2. Summarize with Google Gemini
-        {content[:30000]} 
-        """
-        
-    # 2. Summarize with Google Gemini
     gemini_key = os.getenv("GEMINI_API_KEY")
     if not gemini_key:
          raise HTTPException(status_code=500, detail="Gemini API Key not configured")
