@@ -28,14 +28,6 @@ app.add_middleware(
 class SummarizeRequest(BaseModel):
     url: str
 
-@app.get("/")
-def read_root():
-    return {"message": "Vibe Digest API is running"}
-
-@app.get("/health")
-def health_check():
-    return {"status": "ok"}
-
 @app.post("/api/summarize")
 async def summarize(request: SummarizeRequest):
     # 1. Extract content with Jina AI Reader
