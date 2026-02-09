@@ -35,13 +35,11 @@ async def summarize(request: SummarizeRequest):
     jina_url = f"https://r.jina.ai/{request.url}"
     try:
         headers = {
-            "X-With-Generated-Alt": "true"
+            "X-With-Generated-Alt": "true",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
         # FORCE FREE TIER: Do not use any API Key for Jina AI
         # This prevents 401 Unauthorized errors caused by invalid/revoked keys
-        # jina_key = os.getenv("JINA_API_KEY") ... (Ignored)
-        
-        # headers["Authorization"] = ... (Removed)
         
         response = requests.get(jina_url, headers=headers)
 
