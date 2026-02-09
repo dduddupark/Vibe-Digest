@@ -32,7 +32,10 @@ class SummarizeRequest(BaseModel):
 
 @app.post("/api/summarize")
 async def summarize(request: SummarizeRequest):
-    # 1. Extract content using cloudscraper (Bypasses Cloudflare & 403 Forbidden)
+    # 1. Extract content using cloudscraper (Primary)
+    content = ""
+    error_details = []
+    
     try:
         scraper = cloudscraper.create_scraper(
             browser={
@@ -43,20 +46,43 @@ async def summarize(request: SummarizeRequest):
         )
         response = scraper.get(request.url)
         response.raise_for_status()
-        
         soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Remove script and style elements
         for script in soup(["script", "style", "nav", "footer", "header", "iframe", "noscript"]):
             script.decompose()
-            
         content = soup.get_text(separator=' ', strip=True)
         
-        if not content:
-            raise HTTPException(status_code=400, detail="Could not extract text content from the URL.")
-            
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch content with cloudscraper: {str(e)}")
+        error_details.append(f"Cloudscraper failed: {str(e)}")
+        
+        # 2. Fallback: Google Web Cache (Bypass IP blocking)
+        try:
+            print(f"Primary scraping failed. Trying Google Web Cache for {request.url}")
+            # Use specific headers to mimic a user coming from Google Search
+            cache_url = f"http://webcache.googleusercontent.com/search?q=cache:{request.url}&strip=1&vwsrc=0"
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                "Referer": "https://www.google.com/"
+            }
+            response = requests.get(cache_url, headers=headers, timeout=10)
+            
+            # Google Cache returns 404 if not found, or 200 if found
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                # Google Cache adds a header/banner, remove it
+                auth_header = soup.find(id="google-cache-hdr")
+                if auth_header:
+                    auth_header.decompose()
+                    
+                content = soup.get_text(separator=' ', strip=True)
+            else:
+                error_details.append(f"Google Cache returned {response.status_code}")
+                
+        except Exception as e2:
+            error_details.append(f"Google Cache failed: {str(e2)}")
+
+    if not content:
+        # If all methods fail, raise the accumulated errors
+        raise HTTPException(status_code=500, detail=f"Failed to fetch content. Errors: {'; '.join(error_details)}")
 
     # 2. Summarize with Google Gemini
     gemini_key = os.getenv("GEMINI_API_KEY")
