@@ -22,8 +22,14 @@ export default function Home() {
       });
 
       if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.detail || 'Failed to fetch summary');
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          const errorData = await res.json().catch(() => ({}));
+          throw new Error(errorData.detail || 'Failed to fetch summary');
+        } else {
+          const errText = await res.text();
+          throw new Error(`Server Error (${res.status}): ${errText.slice(0, 200)}`);
+        }
       }
 
       const data = await res.json();
