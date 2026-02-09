@@ -54,52 +54,57 @@ export default function Home() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center p-8 font-sans">
-      <main className="w-full max-w-2xl flex flex-col items-center gap-8 animate-fade-in">
-        <h1 className="text-4xl font-bold tracking-tight text-gray-800">Vibe Digest</h1>
+    <div className="flex min-h-screen flex-col items-center justify-center p-8 font-sans bg-[#fcfcfc]">
+      <main className="w-full max-w-2xl flex flex-col items-center gap-10 animate-fade-in">
+        <div className="text-center flex flex-col gap-2">
+          <h1 className="text-5xl font-black tracking-tighter text-gray-900">AI 기사 요약</h1>
+          <p className="text-gray-400 font-medium uppercase tracking-[0.2em] text-xs">Summarize Articles</p>
+        </div>
 
-        <div className="w-full glass-card p-6 rounded-2xl">
-          <div className="flex flex-col gap-4">
-            <input
-              type="url"
-              placeholder="Paste news URL here..."
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              className="w-full p-4 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-black transition"
-            />
+        <div className="w-full glass-card p-8 rounded-[2.5rem] shadow-2xl shadow-gray-200/50">
+          <div className="flex flex-col gap-5">
+            <div className="relative">
+              <input
+                type="url"
+                placeholder="뉴스 기사 URL을 붙여넣으세요..."
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                className="w-full p-5 rounded-2xl border-2 border-gray-100 focus:border-black focus:outline-none transition-all bg-gray-50/50 text-lg placeholder:text-gray-300"
+              />
+            </div>
             <button
               onClick={handleSummarize}
               disabled={loading || !url}
-              className="w-full py-3 bg-black text-white rounded-xl font-medium hover:opacity-90 transition disabled:opacity-50 flex justify-center items-center cursor-pointer shadow-lg shadow-black/10"
+              className="w-full py-5 bg-black text-white rounded-2xl font-bold text-xl hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-30 flex justify-center items-center cursor-pointer shadow-xl shadow-black/20 overflow-hidden relative"
             >
               {loading ? (
-                <span className="flex items-center gap-2">
-                  <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Summarizing...
-                </span>
+                <div className="flex flex-col items-center gap-2">
+                  <div className="cat-run-container">
+                    <span className="cat-emoji">🐈‍⬛</span>
+                  </div>
+                  <span className="text-sm font-medium animate-pulse">기사를 읽고 있어요...</span>
+                </div>
               ) : (
-                'Generate Digest'
+                '요약하기'
               )}
             </button>
           </div>
         </div>
 
         {error && (
-          <div className="text-red-500 bg-red-50 p-4 rounded-xl w-full border border-red-100 text-sm">
-            <b>Error:</b> {error}
+          <div className="text-red-600 bg-red-50/50 backdrop-blur-sm p-5 rounded-2xl w-full border border-red-100/50 text-sm font-medium flex gap-3 items-center">
+            <span className="bg-red-100 p-1 rounded-full text-xs">⚠️</span>
+            <span>{error}</span>
           </div>
         )}
 
         {summary && (
-          <div className="w-full glass-card p-8 rounded-2xl animate-fade-in relative group">
+          <div className="w-full glass-card p-10 rounded-[2.5rem] animate-fade-in relative group border-2 border-white/50">
             <button
               onClick={copyToClipboard}
-              className="absolute top-4 right-4 p-2 rounded-lg bg-gray-50 text-gray-400 hover:text-black hover:bg-gray-100 transition opacity-0 group-hover:opacity-100 text-xs font-medium"
+              className="absolute top-6 right-6 px-4 py-2 rounded-xl bg-gray-900 text-white hover:bg-black transition-all opacity-0 group-hover:opacity-100 text-xs font-bold shadow-lg"
             >
-              {copied ? 'Copied!' : 'Copy'}
+              {copied ? '복사 완료!' : '결과 복사'}
             </button>
             <div className="markdown-content">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -110,30 +115,94 @@ export default function Home() {
         )}
       </main>
 
+      <footer className="mt-20 text-gray-300 text-xs font-medium tracking-widest uppercase pb-10">
+        &copy; 2026 Summarize Articles
+      </footer>
+
       <style jsx global>{`
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=Noto+Sans+KR:wght@400;700;900&display=swap');
+        
+        body {
+          font-family: 'Inter', 'Noto Sans KR', sans-serif;
+        }
+
+        .cat-run-container {
+          position: relative;
+          width: 60px;
+          height: 30px;
+          overflow: hidden;
+        }
+
+        .cat-emoji {
+          position: absolute;
+          font-size: 24px;
+          animation: catRun 1.5s infinite linear;
+        }
+
+        @keyframes catRun {
+          0% { left: -30px; transform: scaleX(1); }
+          45% { transform: scaleX(1); }
+          50% { left: 60px; transform: scaleX(-1); }
+          95% { transform: scaleX(-1); }
+          100% { left: -30px; transform: scaleX(1); }
+        }
+
         .markdown-content strong {
           display: block;
-          font-size: 1.25rem;
-          margin-bottom: 1.5rem;
-          color: #1a1a1b;
+          font-size: 1.5rem;
+          font-weight: 900;
+          margin-bottom: 2rem;
+          color: #111;
+          letter-spacing: -0.03em;
+          line-height: 1.2;
         }
         .markdown-content ul {
-          list-style-type: disc;
-          padding-left: 1.5rem;
-          margin-bottom: 1.5rem;
-          color: #374151;
+          list-style: none;
+          padding: 0;
+          margin-bottom: 2rem;
+          display: flex;
+          flex-direction: column;
+          gap: 0.75rem;
         }
         .markdown-content li {
-          margin-bottom: 0.5rem;
+          padding: 1.25rem;
+          background: rgba(255,255,255,0.4);
+          border-radius: 1rem;
+          border: 1px solid rgba(0,0,0,0.03);
+          color: #444;
+          line-height: 1.6;
+          position: relative;
+          padding-left: 3rem;
+        }
+        .markdown-content li::before {
+          content: '✓';
+          position: absolute;
+          left: 1.25rem;
+          top: 1.3rem;
+          color: #000;
+          font-weight: bold;
         }
         .markdown-content em {
           display: block;
-          margin-top: 2rem;
-          padding: 1rem;
-          background: #fdfdfd;
-          border-left: 3px solid #000;
-          color: #6b7280;
+          margin-top: 3rem;
+          padding: 1.5rem;
+          background: #111;
+          border-radius: 1.25rem;
+          color: #eee;
           font-style: italic;
+          font-size: 0.95rem;
+          line-height: 1.6;
+          box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        .markdown-content em::before {
+          content: 'Insight';
+          display: block;
+          font-size: 0.5rem;
+          text-transform: uppercase;
+          letter-spacing: 0.3em;
+          margin-bottom: 0.5rem;
+          color: #666;
+          font-style: normal;
         }
       `}</style>
     </div>
