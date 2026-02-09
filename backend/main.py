@@ -38,7 +38,7 @@ async def summarize(request: SummarizeRequest):
         }
         # Check if Jina API Key is provided, though optional for free tier
         jina_key = os.getenv("JINA_API_KEY")
-        if jina_key:
+        if jina_key and jina_key.strip() and not jina_key.startswith("...") and "선택사항" not in jina_key:
             headers["Authorization"] = f"Bearer {jina_key}"
             
         response = requests.get(jina_url, headers=headers)
