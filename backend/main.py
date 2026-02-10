@@ -153,24 +153,48 @@ async def summarize(request: SummarizeRequest):
             # Fallback to common model names
             actual_available = ["models/gemini-1.5-flash", "models/gemini-pro"]
 
-        # Priority order (substring matching)
-        priorities = ["1.5-flash", "1.5-pro", "1.0-pro", "gemini-pro"]
+        # Filter out models with known zero quota (experimental, 3.x versions, etc)
+        filtered_models = [
+            m for m in actual_available 
+            if not any(exclude in m for exclude in ["gemini-3", "gemini-2.5", "exp", "experimental"])
+        ]
         
-        # Build queue by matching priorities with available models
+        print(f"Filtered models (excluding zero-quota): {filtered_models}")
+
+        # Priority order: 1.5-flash > 1.5-pro > 1.0-pro
+        # We use specific patterns to avoid matching unwanted models
+        priorities = [
+            ("1.5-flash", "flash"),  # Match 1.5-flash variants
+            ("1.5-pro", "1.5-pro"),  # Match 1.5-pro specifically
+            ("1.0-pro", "1.0"),      # Match 1.0-pro
+        ]
+        
+        # Build queue by matching priorities with filtered models
         final_queue = []
-        for priority in priorities:
-            for model in actual_available:
-                if priority in model and model not in final_queue:
+        for pattern, identifier in priorities:
+            for model in filtered_models:
+                if pattern in model and model not in final_queue:
                     final_queue.append(model)
+                    print(f"Added {model} to queue (matched: {identifier})")
                     break
         
-        # If nothing matched, use the first available model
-        if not final_queue and actual_available:
-            final_queue = [actual_available[0]]
+        # If nothing matched, try to find any flash model
+        if not final_queue:
+            for model in filtered_models:
+                if "flash" in model.lower():
+                    final_queue.append(model)
+                    print(f"Fallback: using flash model {model}")
+                    break
+        
+        # If still nothing, use first filtered model
+        if not final_queue and filtered_models:
+            final_queue = [filtered_models[0]]
+            print(f"Using first available model: {filtered_models[0]}")
         
         # Last resort fallback
         if not final_queue:
             final_queue = ["models/gemini-1.5-flash"]
+            print("Using hardcoded fallback: models/gemini-1.5-flash")
 
         print(f"Final model queue: {final_queue}")
 
