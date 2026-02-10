@@ -153,13 +153,14 @@ async def summarize(request: SummarizeRequest):
             # Fallback to common model names
             actual_available = ["models/gemini-1.5-flash", "models/gemini-pro"]
 
-        # Filter out models with known zero quota (experimental, 3.x versions, etc)
+        # Filter out models with known zero quota
+        # Free tier only supports gemini-1.5 variants reliably
         filtered_models = [
             m for m in actual_available 
-            if not any(exclude in m for exclude in ["gemini-3", "gemini-2.5", "exp", "experimental"])
+            if "gemini-1.5" in m and not any(exclude in m for exclude in ["exp", "experimental"])
         ]
         
-        print(f"Filtered models (excluding zero-quota): {filtered_models}")
+        print(f"Filtered models (gemini-1.5 only): {filtered_models}")
 
         # Priority order: 1.5-flash > 1.5-pro > 1.0-pro
         # We use specific patterns to avoid matching unwanted models
