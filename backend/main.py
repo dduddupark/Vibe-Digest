@@ -40,9 +40,31 @@ async def fetch_jina(url: str, client: httpx.AsyncClient):
         jina_url = f"https://r.jina.ai/{quote(url)}"
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
         response = await client.get(jina_url, headers=headers, timeout=15)
-        if response.status_code == 200 and len(response.text) > 300 and "Google Search" not in response.text[:500]:
-            print("Successfully fetched via Jina AI")
-            return response.text
+        
+        if response.status_code == 200 and len(response.text) > 300:
+            text = response.text
+            
+            # Check for common error indicators
+            error_keywords = [
+                "Google Search",
+                "403 Forbidden",
+                "Access Denied",
+                "security check",
+                "Cloudflare",
+                "Please enable JavaScript",
+                "I am unable to access",
+                "cannot provide a summary",
+                "do not have access"
+            ]
+            
+            # Check first 1000 chars for error indicators
+            check_portion = text[:1000].lower()
+            if any(keyword.lower() in check_portion for keyword in error_keywords):
+                print(f"Jina AI returned error page (detected: {[k for k in error_keywords if k.lower() in check_portion]})")
+                return None
+            
+            print(f"Successfully fetched via Jina AI ({len(text)} chars)")
+            return text
     except Exception as e:
         print(f"Jina AI failed: {e}")
     return None
@@ -185,6 +207,10 @@ async def summarize(request: SummarizeRequest):
         # Step 3: Try models
         safe_content = content[:10000]
         prompt = f"""
+You are a professional article summarizer. Your task is to ALWAYS provide a summary based on the content given to you.
+
+IMPORTANT: Do NOT refuse to summarize. Do NOT say you cannot access the content. The content has already been extracted and provided below.
+
 Please provide a highly structured summary of the following article in Korean.
 
 Strictly follow this format:
