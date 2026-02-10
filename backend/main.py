@@ -142,32 +142,44 @@ async def summarize(request: SummarizeRequest):
         genai.configure(api_key=gemini_key)
         
         # Try known working model patterns in order of preference
-        # We use trial-and-error because list_models() is unreliable across API versions
+        # We try both with and without 'models/' prefix due to API version differences
         model_candidates = [
             "gemini-1.5-flash-latest",
+            "models/gemini-1.5-flash-latest",
             "gemini-1.5-flash",
+            "models/gemini-1.5-flash",
             "gemini-1.5-flash-001",
-            "gemini-1.5-flash-002",
+            "models/gemini-1.5-flash-001",
+            "gemini-1.5-flash-002", 
+            "models/gemini-1.5-flash-002",
             "gemini-pro",
+            "models/gemini-pro",
             "gemini-1.5-pro-latest",
+            "models/gemini-1.5-pro-latest",
             "gemini-1.5-pro",
+            "models/gemini-1.5-pro",
         ]
         
-        # Optionally try to get available models for logging
+        # Try to get available models for better debugging
         try:
             available = []
             for m in genai.list_models():
                 if 'generateContent' in m.supported_generation_methods:
                     available.append(m.name)
-            print(f"Available models from API: {available}")
+                    print(f"✓ Available: {m.name}")
             
-            # If we got models, prioritize gemini-1.5 variants from the list
-            gemini_15_models = [m for m in available if "gemini-1.5" in m and "exp" not in m]
-            if gemini_15_models:
-                # Prepend discovered 1.5 models to our candidates
-                model_candidates = gemini_15_models + [m for m in model_candidates if m not in gemini_15_models]
+            if available:
+                print(f"Total available models: {len(available)}")
+                # Prioritize discovered gemini-1.5 models
+                gemini_15_models = [m for m in available if "gemini-1.5" in m and "exp" not in m.lower()]
+                if gemini_15_models:
+                    # Put discovered models at the front
+                    model_candidates = gemini_15_models + [m for m in model_candidates if m not in gemini_15_models]
+                    print(f"Using discovered 1.5 models first: {gemini_15_models}")
+            else:
+                print("⚠️ list_models() returned empty list")
         except Exception as e:
-            print(f"Could not list models (will try predefined patterns): {e}")
+            print(f"⚠️ Could not list models: {str(e)[:200]}")
 
         print(f"Will try models in order: {model_candidates[:5]}...")
 
