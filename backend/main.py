@@ -37,9 +37,9 @@ from urllib.parse import quote
 # Helper functions for parallel fetching
 async def fetch_jina(url: str, client: httpx.AsyncClient):
     try:
-        jina_url = f"https://r.jina.ai/{url}"
+        jina_url = f"https://r.jina.ai/{quote(url)}"
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
-        response = await client.get(jina_url, headers=headers, timeout=10)
+        response = await client.get(jina_url, headers=headers, timeout=15)
         if response.status_code == 200 and len(response.text) > 300 and "Google Search" not in response.text[:500]:
             print("Successfully fetched via Jina AI")
             return response.text
@@ -50,7 +50,7 @@ async def fetch_jina(url: str, client: httpx.AsyncClient):
 async def fetch_microlink(url: str, client: httpx.AsyncClient):
     try:
         microlink_url = f"https://api.microlink.io/?url={quote(url)}&embed=content.text"
-        response = await client.get(microlink_url, timeout=10)
+        response = await client.get(microlink_url, timeout=15)
         if response.status_code == 200:
             data = response.json()
             content = data.get('data', {}).get('content', {}).get('text', '')
@@ -61,16 +61,44 @@ async def fetch_microlink(url: str, client: httpx.AsyncClient):
         print(f"Microlink failed: {e}")
     return None
 
-def fetch_cloudscraper_sync(url: str):
+async def fetch_google_cache(url: str, client: httpx.AsyncClient):
     try:
-        scraper = cloudscraper.create_scraper()
-        response = scraper.get(url, timeout=10)
+        cache_url = f"http://webcache.googleusercontent.com/search?q=cache:{quote(url)}&strip=1&vwsrc=0"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "Referer": "https://www.google.com/"
+        }
+        response = await client.get(cache_url, headers=headers, timeout=15)
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
-            for s in soup(["script", "style", "nav", "footer", "header"]):
+            # Remove the cache header
+            header = soup.find(id="google-cache-hdr")
+            if header: header.decompose()
+            content = soup.get_text(separator=' ', strip=True)
+            if len(content) > 300 and "Google Search" not in content[:500]:
+                print("Successfully fetched via Google Cache")
+                return content
+    except Exception as e:
+        print(f"Google Cache failed: {e}")
+    return None
+
+def fetch_cloudscraper_sync(url: str):
+    try:
+        # Hankyung needs a specific browser fingerprint sometimes
+        scraper = cloudscraper.create_scraper(
+            browser={
+                'browser': 'chrome',
+                'platform': 'windows',
+                'desktop': True
+            }
+        )
+        response = scraper.get(url, timeout=15)
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            for s in soup(["script", "style", "nav", "footer", "header", "iframe"]):
                 s.decompose()
             content = soup.get_text(separator=' ', strip=True)
-            if len(content) > 200 and "Access Denied" not in content:
+            if len(content) > 300 and "Access Denied" not in content:
                 print("Successfully fetched via Cloudscraper")
                 return content
     except Exception as e:
@@ -82,12 +110,13 @@ async def summarize(request: SummarizeRequest):
     url = request.url.strip()
     content = ""
     
-    # Task 1: Fetch Content in Parallel
+    # Task 1: Fetch Content in Quad-Parallel
     async with httpx.AsyncClient(follow_redirects=True) as client:
         # Create tasks for all sources
         tasks = [
             fetch_jina(url, client),
             fetch_microlink(url, client),
+            fetch_google_cache(url, client),
             asyncio.to_thread(fetch_cloudscraper_sync, url)
         ]
         
@@ -96,7 +125,6 @@ async def summarize(request: SummarizeRequest):
             result = await completed_task
             if result:
                 content = result
-                # Cancel other tasks if possible (though as_completed doesn't do it automatically)
                 break
     
     if not content:
