@@ -141,72 +141,45 @@ async def summarize(request: SummarizeRequest):
     try:
         genai.configure(api_key=gemini_key)
         
-        # Discover available models
-        actual_available = []
+        # Try known working model patterns in order of preference
+        # We use trial-and-error because list_models() is unreliable across API versions
+        model_candidates = [
+            "gemini-1.5-flash-latest",
+            "gemini-1.5-flash",
+            "gemini-1.5-flash-001",
+            "gemini-1.5-flash-002",
+            "gemini-pro",
+            "gemini-1.5-pro-latest",
+            "gemini-1.5-pro",
+        ]
+        
+        # Optionally try to get available models for logging
         try:
+            available = []
             for m in genai.list_models():
                 if 'generateContent' in m.supported_generation_methods:
-                    actual_available.append(m.name)
-                    print(f"Available model: {m.name}")
+                    available.append(m.name)
+            print(f"Available models from API: {available}")
+            
+            # If we got models, prioritize gemini-1.5 variants from the list
+            gemini_15_models = [m for m in available if "gemini-1.5" in m and "exp" not in m]
+            if gemini_15_models:
+                # Prepend discovered 1.5 models to our candidates
+                model_candidates = gemini_15_models + [m for m in model_candidates if m not in gemini_15_models]
         except Exception as e:
-            print(f"Error listing models: {e}")
-            # Fallback to common model names
-            actual_available = ["models/gemini-1.5-flash", "models/gemini-pro"]
+            print(f"Could not list models (will try predefined patterns): {e}")
 
-        # Filter out models with known zero quota
-        # Free tier only supports gemini-1.5 variants reliably
-        filtered_models = [
-            m for m in actual_available 
-            if "gemini-1.5" in m and not any(exclude in m for exclude in ["exp", "experimental"])
-        ]
-        
-        print(f"Filtered models (gemini-1.5 only): {filtered_models}")
-
-        # Priority order: 1.5-flash > 1.5-pro > 1.0-pro
-        # We use specific patterns to avoid matching unwanted models
-        priorities = [
-            ("1.5-flash", "flash"),  # Match 1.5-flash variants
-            ("1.5-pro", "1.5-pro"),  # Match 1.5-pro specifically
-            ("1.0-pro", "1.0"),      # Match 1.0-pro
-        ]
-        
-        # Build queue by matching priorities with filtered models
-        final_queue = []
-        for pattern, identifier in priorities:
-            for model in filtered_models:
-                if pattern in model and model not in final_queue:
-                    final_queue.append(model)
-                    print(f"Added {model} to queue (matched: {identifier})")
-                    break
-        
-        # If nothing matched, try to find any flash model
-        if not final_queue:
-            for model in filtered_models:
-                if "flash" in model.lower():
-                    final_queue.append(model)
-                    print(f"Fallback: using flash model {model}")
-                    break
-        
-        # If still nothing, use first filtered model
-        if not final_queue and filtered_models:
-            final_queue = [filtered_models[0]]
-            print(f"Using first available model: {filtered_models[0]}")
-        
-        # Last resort fallback
-        if not final_queue:
-            final_queue = ["models/gemini-1.5-flash"]
-            print("Using hardcoded fallback: models/gemini-1.5-flash")
-
-        print(f"Final model queue: {final_queue}")
+        print(f"Will try models in order: {model_candidates[:5]}...")
 
         safe_content = content[:10000]
         last_error = ""
 
-        # Try models
-        for model_name in final_queue:
+        # Try each model until one works
+        for model_name in model_candidates:
             try:
-                print(f"Attempting to use model: {model_name}")
+                print(f"Attempting model: {model_name}")
                 model = genai.GenerativeModel(model_name)
+                
                 prompt = f"""
                 Please provide a highly structured summary of the following article in Korean.
                 
@@ -218,17 +191,22 @@ async def summarize(request: SummarizeRequest):
                 Article content:
                 {safe_content}
                 """
-                # Use async version of generate_content
+                
                 response = await asyncio.to_thread(model.generate_content, prompt)
                 if response and response.text:
-                    print(f"Successfully generated summary with {model_name}")
+                    print(f"✅ Success with model: {model_name}")
                     return {"summary": response.text}
             except Exception as e:
                 last_error = str(e)
-                print(f"Model {model_name} failed: {last_error}")
+                error_msg = str(e)[:100]
+                print(f"❌ Model {model_name} failed: {error_msg}")
+                
+                # Skip to next model
                 continue
 
-        raise HTTPException(status_code=500, detail=f"요약 생성에 실패했습니다. (할당량 초과일 수 있습니다) 마지막 에러: {last_error}")
+        raise HTTPException(status_code=500, detail=f"모든 Gemini 모델 시도 실패. 마지막 에러: {last_error[:200]}")
 
+    except HTTPException as he:
+        raise he
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"요약 프로세스 중 오류 발생: {str(e)}")
