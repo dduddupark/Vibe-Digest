@@ -120,11 +120,14 @@ async def summarize(request: SummarizeRequest):
             asyncio.to_thread(fetch_cloudscraper_sync, url)
         ]
         
-        # We want the first one that returns non-None content
-        for completed_task in asyncio.as_completed(tasks):
-            result = await completed_task
-            if result:
+        # Wait for all tasks and collect results
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Use the first successful (non-None, non-exception) result
+        for result in results:
+            if result and not isinstance(result, Exception):
                 content = result
+                print(f"Using content of length: {len(content)}")
                 break
     
     if not content:
