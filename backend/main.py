@@ -140,15 +140,49 @@ async def summarize(request: SummarizeRequest):
     
     # Use direct REST API to avoid SDK version issues
     async with httpx.AsyncClient() as client:
-        # Try different model names and API versions
-        attempts = [
-            ("v1", "gemini-1.5-flash-latest"),
-            ("v1", "gemini-1.5-flash"),
-            ("v1beta", "gemini-1.5-flash-latest"),
-            ("v1beta", "gemini-1.5-flash"),
-            ("v1", "gemini-pro"),
-        ]
+        # Step 1: Get list of available models
+        available_models = []
+        for api_version in ["v1", "v1beta"]:
+            try:
+                list_url = f"https://generativelanguage.googleapis.com/{api_version}/models"
+                response = await client.get(list_url, params={"key": gemini_key}, timeout=10)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    models = data.get("models", [])
+                    for m in models:
+                        model_name = m.get("name", "")
+                        methods = m.get("supportedGenerationMethods", [])
+                        if "generateContent" in methods:
+                            available_models.append((api_version, model_name))
+                            print(f"✓ Found: {api_version}/{model_name}")
+                    break  # Use first working API version
+            except Exception as e:
+                print(f"⚠️ Failed to list models on {api_version}: {str(e)[:100]}")
+                continue
         
+        # Step 2: Filter and prioritize models
+        if not available_models:
+            print("⚠️ Could not discover models, using fallback list")
+            # Fallback: try common model names with both API versions
+            available_models = [
+                ("v1", "models/gemini-1.5-flash-latest"),
+                ("v1", "models/gemini-1.5-flash"),
+                ("v1beta", "models/gemini-1.5-flash-latest"),
+                ("v1beta", "models/gemini-1.5-flash"),
+            ]
+        
+        # Prioritize gemini-1.5-flash variants
+        prioritized = []
+        for api_ver, model in available_models:
+            if "gemini-1.5" in model and "flash" in model and "exp" not in model.lower():
+                prioritized.insert(0, (api_ver, model))
+            else:
+                prioritized.append((api_ver, model))
+        
+        print(f"📋 Will try {len(prioritized[:5])} models: {[m for _,m in prioritized[:5]]}")
+        
+        # Step 3: Try models
         safe_content = content[:10000]
         prompt = f"""
 Please provide a highly structured summary of the following article in Korean.
@@ -164,13 +198,12 @@ Article content:
         
         last_error = ""
         
-        for api_version, model_name in attempts:
+        for api_version, full_model_name in prioritized[:10]:  # Try up to 10 models
             try:
-                url = f"https://generativelanguage.googleapis.com/{api_version}/models/{model_name}:generateContent"
+                # Extract model name (remove 'models/' prefix if present)
+                model_name = full_model_name.replace("models/", "")
                 
-                headers = {
-                    "Content-Type": "application/json",
-                }
+                url = f"https://generativelanguage.googleapis.com/{api_version}/models/{model_name}:generateContent"
                 
                 payload = {
                     "contents": [{
@@ -180,12 +213,12 @@ Article content:
                     }]
                 }
                 
-                print(f"Trying {api_version}/{model_name}...")
+                print(f"🔄 Trying {api_version}/{model_name}...")
                 
                 response = await client.post(
                     url,
                     params={"key": gemini_key},
-                    headers=headers,
+                    headers={"Content-Type": "application/json"},
                     json=payload,
                     timeout=30
                 )
@@ -196,24 +229,25 @@ Article content:
                     # Extract text from response
                     try:
                         summary = data["candidates"][0]["content"]["parts"][0]["text"]
-                        print(f"✅ Success with {api_version}/{model_name}")
+                        print(f"✅ SUCCESS with {api_version}/{model_name}")
                         return {"summary": summary}
                     except (KeyError, IndexError) as e:
                         print(f"⚠️ Response format error: {e}")
-                        print(f"Response: {str(data)[:200]}")
+                        print(f"Response structure: {list(data.keys())}")
                         continue
                 else:
-                    error_text = response.text[:200]
-                    print(f"❌ {api_version}/{model_name}: HTTP {response.status_code} - {error_text}")
+                    error_text = response.text[:300]
+                    print(f"❌ {api_version}/{model_name}: HTTP {response.status_code}")
+                    print(f"   Error: {error_text}")
                     last_error = f"{response.status_code}: {error_text}"
                     
             except Exception as e:
-                error_msg = str(e)[:100]
-                print(f"❌ {api_version}/{model_name}: {error_msg}")
+                error_msg = str(e)[:150]
+                print(f"❌ {api_version}/{model_name}: Exception - {error_msg}")
                 last_error = str(e)
                 continue
         
         raise HTTPException(
             status_code=500, 
-            detail=f"모든 Gemini API 호출 실패. 마지막 에러: {last_error[:200]}"
+            detail=f"모든 Gemini API 호출 실패 ({len(prioritized)} 모델 시도). 마지막 에러: {last_error[:200]}"
         )
