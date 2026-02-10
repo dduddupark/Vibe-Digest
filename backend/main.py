@@ -133,92 +133,87 @@ async def summarize(request: SummarizeRequest):
     if not content:
         raise HTTPException(status_code=500, detail="모든 경로를 통한 기사 읽기에 실패했습니다. URL을 다시 확인해주세요.")
 
-    # Task 2: Summarize with Gemini
+    # Task 2: Summarize with Gemini (Direct REST API)
     gemini_key = os.getenv("GEMINI_API_KEY")
     if not gemini_key:
         raise HTTPException(status_code=500, detail="Gemini API Key가 설정되지 않았습니다.")
     
-    try:
-        genai.configure(api_key=gemini_key)
-        
-        # Try known working model patterns in order of preference
-        # We try both with and without 'models/' prefix due to API version differences
-        model_candidates = [
-            "gemini-1.5-flash-latest",
-            "models/gemini-1.5-flash-latest",
-            "gemini-1.5-flash",
-            "models/gemini-1.5-flash",
-            "gemini-1.5-flash-001",
-            "models/gemini-1.5-flash-001",
-            "gemini-1.5-flash-002", 
-            "models/gemini-1.5-flash-002",
-            "gemini-pro",
-            "models/gemini-pro",
-            "gemini-1.5-pro-latest",
-            "models/gemini-1.5-pro-latest",
-            "gemini-1.5-pro",
-            "models/gemini-1.5-pro",
+    # Use direct REST API to avoid SDK version issues
+    async with httpx.AsyncClient() as client:
+        # Try different model names and API versions
+        attempts = [
+            ("v1", "gemini-1.5-flash-latest"),
+            ("v1", "gemini-1.5-flash"),
+            ("v1beta", "gemini-1.5-flash-latest"),
+            ("v1beta", "gemini-1.5-flash"),
+            ("v1", "gemini-pro"),
         ]
         
-        # Try to get available models for better debugging
-        try:
-            available = []
-            for m in genai.list_models():
-                if 'generateContent' in m.supported_generation_methods:
-                    available.append(m.name)
-                    print(f"✓ Available: {m.name}")
-            
-            if available:
-                print(f"Total available models: {len(available)}")
-                # Prioritize discovered gemini-1.5 models
-                gemini_15_models = [m for m in available if "gemini-1.5" in m and "exp" not in m.lower()]
-                if gemini_15_models:
-                    # Put discovered models at the front
-                    model_candidates = gemini_15_models + [m for m in model_candidates if m not in gemini_15_models]
-                    print(f"Using discovered 1.5 models first: {gemini_15_models}")
-            else:
-                print("⚠️ list_models() returned empty list")
-        except Exception as e:
-            print(f"⚠️ Could not list models: {str(e)[:200]}")
-
-        print(f"Will try models in order: {model_candidates[:5]}...")
-
         safe_content = content[:10000]
+        prompt = f"""
+Please provide a highly structured summary of the following article in Korean.
+
+Strictly follow this format:
+1. One sentence headline starting with **[Headline]**
+2. 3 Key Points as a bulleted list
+3. One Insight Comment starting with *[Insight]* and in italics
+
+Article content:
+{safe_content}
+"""
+        
         last_error = ""
-
-        # Try each model until one works
-        for model_name in model_candidates:
+        
+        for api_version, model_name in attempts:
             try:
-                print(f"Attempting model: {model_name}")
-                model = genai.GenerativeModel(model_name)
+                url = f"https://generativelanguage.googleapis.com/{api_version}/models/{model_name}:generateContent"
                 
-                prompt = f"""
-                Please provide a highly structured summary of the following article in Korean.
+                headers = {
+                    "Content-Type": "application/json",
+                }
                 
-                Strictly follow this format:
-                1. One sentence headline starting with **[Headline]**
-                2. 3 Key Points as a bulleted list
-                3. One Insight Comment starting with *[Insight]* and in italics
+                payload = {
+                    "contents": [{
+                        "parts": [{
+                            "text": prompt
+                        }]
+                    }]
+                }
                 
-                Article content:
-                {safe_content}
-                """
+                print(f"Trying {api_version}/{model_name}...")
                 
-                response = await asyncio.to_thread(model.generate_content, prompt)
-                if response and response.text:
-                    print(f"✅ Success with model: {model_name}")
-                    return {"summary": response.text}
+                response = await client.post(
+                    url,
+                    params={"key": gemini_key},
+                    headers=headers,
+                    json=payload,
+                    timeout=30
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    
+                    # Extract text from response
+                    try:
+                        summary = data["candidates"][0]["content"]["parts"][0]["text"]
+                        print(f"✅ Success with {api_version}/{model_name}")
+                        return {"summary": summary}
+                    except (KeyError, IndexError) as e:
+                        print(f"⚠️ Response format error: {e}")
+                        print(f"Response: {str(data)[:200]}")
+                        continue
+                else:
+                    error_text = response.text[:200]
+                    print(f"❌ {api_version}/{model_name}: HTTP {response.status_code} - {error_text}")
+                    last_error = f"{response.status_code}: {error_text}"
+                    
             except Exception as e:
-                last_error = str(e)
                 error_msg = str(e)[:100]
-                print(f"❌ Model {model_name} failed: {error_msg}")
-                
-                # Skip to next model
+                print(f"❌ {api_version}/{model_name}: {error_msg}")
+                last_error = str(e)
                 continue
-
-        raise HTTPException(status_code=500, detail=f"모든 Gemini 모델 시도 실패. 마지막 에러: {last_error[:200]}")
-
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"요약 프로세스 중 오류 발생: {str(e)}")
+        
+        raise HTTPException(
+            status_code=500, 
+            detail=f"모든 Gemini API 호출 실패. 마지막 에러: {last_error[:200]}"
+        )
