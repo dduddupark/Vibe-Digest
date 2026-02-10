@@ -141,20 +141,38 @@ async def summarize(request: SummarizeRequest):
     try:
         genai.configure(api_key=gemini_key)
         
-        # Optimized Model Queue
-        models_priority = ["models/gemini-1.5-flash", "models/gemini-1.5-flash-latest", "models/gemini-pro"]
-        
-        # Discover available models (cached would be better but this is SDK restricted)
+        # Discover available models
         actual_available = []
         try:
             for m in genai.list_models():
                 if 'generateContent' in m.supported_generation_methods:
                     actual_available.append(m.name)
-        except:
-            actual_available = models_priority
+                    print(f"Available model: {m.name}")
+        except Exception as e:
+            print(f"Error listing models: {e}")
+            # Fallback to common model names
+            actual_available = ["models/gemini-1.5-flash", "models/gemini-pro"]
 
-        final_queue = [m for m in models_priority if m in actual_available]
-        if not final_queue: final_queue = ["models/gemini-1.5-flash"]
+        # Priority order (substring matching)
+        priorities = ["1.5-flash", "1.5-pro", "1.0-pro", "gemini-pro"]
+        
+        # Build queue by matching priorities with available models
+        final_queue = []
+        for priority in priorities:
+            for model in actual_available:
+                if priority in model and model not in final_queue:
+                    final_queue.append(model)
+                    break
+        
+        # If nothing matched, use the first available model
+        if not final_queue and actual_available:
+            final_queue = [actual_available[0]]
+        
+        # Last resort fallback
+        if not final_queue:
+            final_queue = ["models/gemini-1.5-flash"]
+
+        print(f"Final model queue: {final_queue}")
 
         safe_content = content[:10000]
         last_error = ""
@@ -162,6 +180,7 @@ async def summarize(request: SummarizeRequest):
         # Try models
         for model_name in final_queue:
             try:
+                print(f"Attempting to use model: {model_name}")
                 model = genai.GenerativeModel(model_name)
                 prompt = f"""
                 Please provide a highly structured summary of the following article in Korean.
@@ -177,9 +196,11 @@ async def summarize(request: SummarizeRequest):
                 # Use async version of generate_content
                 response = await asyncio.to_thread(model.generate_content, prompt)
                 if response and response.text:
+                    print(f"Successfully generated summary with {model_name}")
                     return {"summary": response.text}
             except Exception as e:
                 last_error = str(e)
+                print(f"Model {model_name} failed: {last_error}")
                 continue
 
         raise HTTPException(status_code=500, detail=f"요약 생성에 실패했습니다. (할당량 초과일 수 있습니다) 마지막 에러: {last_error}")
